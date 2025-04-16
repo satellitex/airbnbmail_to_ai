@@ -7,6 +7,7 @@ from typing import Dict, Optional, Tuple, Any
 from loguru import logger
 
 from airbnmail_to_ai.calendar.calendar_auth import get_calendar_service
+from airbnmail_to_ai.db.db_service import DatabaseService
 from airbnmail_to_ai.models.notification import AirbnbNotification, NotificationType
 
 
@@ -22,16 +23,19 @@ class CalendarService:
         self,
         credentials_path: str = "credentials.json",
         token_path: str = "calendar_token.json",
+        db_path: str = "airbnb_notifications.db",
     ) -> None:
         """Initialize the Calendar Service.
 
         Args:
             credentials_path: Path to the Google API credentials file.
             token_path: Path to save the authentication token.
+            db_path: Path to the SQLite database file.
         """
         self.credentials_path = credentials_path
         self.token_path = token_path
         self.service = None
+        self.db = DatabaseService(db_path=db_path)
 
     def connect(self) -> bool:
         """Connect to the Google Calendar API.
@@ -99,6 +103,82 @@ class CalendarService:
                 return None
 
         try:
+            # Check if this notification is already in the database
+            existing_notification = self.db.get_notification(notification.notification_id)
+
+            # Check if this notification is already in the calendar
+            existing_event = self.db.get_calendar_event(notification.notification_id)
+
+            # If notification exists and has a calendar event, check if we need to update
+            if existing_notification and existing_event:
+                # Check if there are any differences that would affect the calendar event
+                needs_update = False
+
+                # Compare fields that would affect the calendar event
+                for field in ["property_name", "guest_name", "check_in", "check_out", "num_guests", "amount", "currency", "reservation_id"]:
+                    existing_value = getattr(existing_notification, field)
+                    new_value = getattr(notification, field)
+                    if existing_value != new_value and new_value is not None:
+                        logger.info(f"Found change in {field}: {existing_value} -> {new_value}")
+                        needs_update = True
+
+                # If LLM analysis changed and it affects dates, we need to update
+                if notification.llm_analysis and existing_notification.llm_analysis:
+                    if (notification.llm_analysis.get('check_in_date') != existing_notification.llm_analysis.get('check_in_date') or
+                        notification.llm_analysis.get('check_out_date') != existing_notification.llm_analysis.get('check_out_date')):
+                        logger.info("Found change in LLM-extracted dates")
+                        needs_update = True
+
+                if not needs_update:
+                    # No significant changes, return existing event ID
+                    event_id = existing_event["event_id"]
+                    logger.info(f"Notification {notification.notification_id} already has calendar event {event_id} and no significant changes detected")
+                    return event_id
+                else:
+                    # Save the updated notification to database
+                    # First delete the existing event
+                    event_id = existing_event["event_id"]
+                    calendar_id = existing_event["calendar_id"]
+                    logger.info(f"Updating calendar event {event_id} for notification {notification.notification_id}")
+                    self.delete_event(event_id, calendar_id, notification.notification_id)
+                    # Continue to create a new event with updated information
+
+            # Save notification to database (either new or updated)
+            if not self.db.save_notification(notification):
+                logger.error(f"Failed to save notification {notification.notification_id} to database")
+                # Continue anyway, as we still want to try adding to calendar
+
+            # If notification has calendar event but we didn't need to update it
+            if existing_event and not locals().get('needs_update'):
+                event_id = existing_event["event_id"]
+                logger.info(f"Notification {notification.notification_id} already has calendar event {event_id}")
+                return event_id
+
+            # Check for duplicate bookings (same property, dates, and guest)
+            if notification.property_name and notification.check_in and notification.check_out and notification.guest_name:
+                duplicates = self.db.find_duplicate_notifications(
+                    property_name=notification.property_name,
+                    check_in=notification.check_in,
+                    check_out=notification.check_out,
+                    guest_name=notification.guest_name
+                )
+
+                # If we found duplicates (other than this notification)
+                other_duplicates = [d for d in duplicates if d.notification_id != notification.notification_id]
+                if other_duplicates:
+                    # Check if any of them already have calendar events
+                    for duplicate in other_duplicates:
+                        dup_event = self.db.get_calendar_event(duplicate.notification_id)
+                        if dup_event:
+                            logger.info(f"Found duplicate booking already in calendar: {duplicate.notification_id}")
+                            # Save the relation to this notification as well
+                            self.db.save_calendar_event(
+                                notification_id=notification.notification_id,
+                                event_id=dup_event["event_id"],
+                                calendar_id=dup_event["calendar_id"]
+                            )
+                            return dup_event["event_id"]
+
             # Only process booking confirmations
             if notification.notification_type != NotificationType.BOOKING_CONFIRMATION:
                 logger.warning(
@@ -192,24 +272,36 @@ class CalendarService:
                 calendarId=calendar_id, body=event
             ).execute()
 
+            # Get the event ID
+            event_id = created_event.get("id")
+
+            if event_id:
+                # Save the calendar event to the database
+                self.db.save_calendar_event(
+                    notification_id=notification.notification_id,
+                    event_id=event_id,
+                    calendar_id=calendar_id
+                )
+
             logger.info(
                 f"Added booking to calendar: {event_title} "
                 f"({check_in_datetime.strftime('%Y-%m-%d %H:%M')} to "
                 f"{check_out_datetime.strftime('%Y-%m-%d %H:%M')})"
             )
 
-            return created_event.get("id")
+            return event_id
 
         except Exception as e:
             logger.exception(f"Error adding booking to calendar: {e}")
             return None
 
-    def delete_event(self, event_id: str, calendar_id: str = "primary") -> bool:
+    def delete_event(self, event_id: str, calendar_id: str = "primary", notification_id: Optional[str] = None) -> bool:
         """Delete an event from Google Calendar.
 
         Args:
             event_id: ID of the event to delete
             calendar_id: Google Calendar ID (default: primary)
+            notification_id: Optional notification ID associated with the event
 
         Returns:
             True if deletion was successful, False otherwise
