@@ -29,11 +29,11 @@ def parse_email(email: Dict[str, Any]) -> Optional[AirbnbNotification]:
         subject = email.get("subject", "")
         body_text = email.get("body_text", "")
 
-        # Use LLM to analyze email content
-        llm_results = llm_analyzer.analyze_reservation(body_text)
-
-        # Extract notification type from LLM analysis or use fallback method
+        # Extract notification type from the subject
         notification_type = _identify_notification_type(subject)
+
+        # Use LLM to analyze email content for all emails
+        llm_results = llm_analyzer.analyze_reservation(body_text)
 
         # Create notification data with basic fields
         notification_data = {
