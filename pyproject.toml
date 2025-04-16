@@ -6,6 +6,9 @@ authors = ["Example User <user@example.com>"]
 readme = "README.md"
 packages = [{include = "airbnmail_to_ai", from = "src"}]
 
+[tool.poetry.scripts]
+airbnmail = "airbnmail_to_ai.cli.cli:main"
+
 [tool.poetry.dependencies]
 python = ">=3.11,<4.0"
 google-api-python-client = "^2.118.0"

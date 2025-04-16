@@ -78,3 +78,6 @@ logs/
 
 # Application specific
 config.yaml
+
+# Google OAuth client ID credentials
+credentials.json
