@@ -9,33 +9,55 @@ from loguru import logger
 
 # Default system prompt for reservation analysis
 DEFAULT_SYSTEM_PROMPT = """
-You are an AI assistant specialized in analyzing Airbnb reservation emails in both English and Japanese.
-Extract the following information from the email:
-1. Notification type: Classify the email as one of the following types:
-   - BOOKING_REQUEST: When a guest requests to book
-   - BOOKING_CONFIRMATION: When a booking is confirmed
-   - CANCELLATION: When a booking is cancelled
-   - MESSAGE: When a guest sends a message
-   - REVIEW: When a review is submitted
-   - REMINDER: Check-in or check-out reminders
-   - PAYMENT: Payment related notifications
-   - UNKNOWN: If none of the above apply
-2. Check-in date: Extract the check-in date and format it as YYYY-MM-DD
-3. Check-out date: Extract the check-out date and format it as YYYY-MM-DD
-4. Received date: Parse the email received date into a standardized format (YYYY-MM-DD)
-5. Guest name: Extract the full name of the guest making the booking
-6. Number of guests: Extract the total number of guests for the booking
-   - For Japanese emails, look for patterns like "ゲスト人数 大人X人" and extract X as the number
-   - Look for numbers following words like "大人", "成人", "人", etc.
-   - Always return only the numeric value (e.g., "4" not "4人")
-7. Property name: Extract the name of the property being booked
+あなたは日本語とEnglishのAirbnb予約メールを分析する専門AIアシスタントです。
+メールから以下の情報を抽出し、JSON形式で出力してください：
 
-Use all available information including subject line, received date, and email body.
-If you cannot determine any piece of information with certainty, indicate this clearly.
-For the number of guests, be precise - extract only the total number of adult guests.
-Provide your confidence level for each extracted piece of information.
+1. 通知タイプ（notification_type）: メールを以下のいずれかに分類してください：
+   - booking_request: ゲストが予約をリクエストした場合
+   - booking_confirmation: 予約が確定した場合
+   - cancellation: 予約がキャンセルされた場合
+   - message: ゲストがメッセージを送信した場合
+   - review: レビューが投稿された場合
+   - reminder: チェックインやチェックアウトのリマインダー
+   - payment: 支払い関連の通知
+   - unknown: 上記のいずれにも当てはまらない場合
 
-When outputting the number of guests, always include it in this format: "Number of guests: X"
+2. チェックイン日（check_in_date）: チェックイン日を抽出し、YYYY-MM-DD形式で出力してください
+   - 例：2025-04-15
+
+3. チェックアウト日（check_out_date）: チェックアウト日を抽出し、YYYY-MM-DD形式で出力してください
+   - 例：2025-04-20
+
+4. 受信日（received_date）: メールの受信日をYYYY-MM-DD形式で解析してください
+
+5. ゲスト名（guest_name）: 予約をしたゲストのフルネームを抽出してください
+
+6. ゲスト人数（num_guests）: 予約の合計ゲスト数を抽出してください
+   - 「ゲスト人数 大人X人」などのパターンを探し、Xを数値として抽出します
+   - 「大人」、「成人」、「人」などの後に続く数字を探してください
+   - 必ず数値のみを返してください（例：「4人」ではなく「4」）
+
+7. 物件名（property_name）: 予約されている物件の名前を抽出してください
+
+件名、受信日、メール本文など、利用可能なすべての情報を使用してください。
+確実に判断できない情報がある場合は、nullとしてください。
+ゲスト人数については、大人のゲスト総数のみを正確に抽出してください。
+各抽出情報の信頼度も提供してください（confidence: "high", "medium", "low"）。
+
+必ず以下のJSON形式で結果を出力してください。それ以外の説明文は含めないでください：
+
+```json
+{
+  "notification_type": "booking_confirmation",
+  "check_in_date": "2025-04-15",
+  "check_out_date": "2025-04-20",
+  "received_date": "2025-04-10",
+  "guest_name": "鈴木太郎",
+  "num_guests": 2,
+  "property_name": "東京タワー近くの素敵なアパート",
+  "confidence": "high"
+}
+```
 """
 
 
@@ -97,10 +119,27 @@ class LLMAnalyzer:
             # Call LLM API or local model
             result = self._call_llm_api(messages)
 
-            # Parse the LLM response to extract structured data
-            analysis_result = self._parse_llm_response(result)
+            # Try to parse the JSON response directly from the LLM
+            try:
+                # Extract the JSON part if enclosed in ```json ... ``` or similar
+                import re
+                json_match = re.search(r'```(?:json)?\s*(.*?)\s*```', result, re.DOTALL)
 
-            return analysis_result
+                if json_match:
+                    json_str = json_match.group(1)
+                    analysis_result = json.loads(json_str)
+                else:
+                    # If no code block markers, try parsing the entire response as JSON
+                    analysis_result = json.loads(result)
+
+                # Add the raw analysis for debugging
+                analysis_result["analysis"] = result
+                return analysis_result
+            except json.JSONDecodeError:
+                # Fallback to regex-based parsing if JSON parsing fails
+                logger.warning("Failed to parse JSON response, falling back to regex parsing")
+                analysis_result = self._parse_llm_response(result)
+                return analysis_result
 
         except Exception as e:
             logger.exception(f"Error in LLM analysis: {e}")
@@ -150,7 +189,7 @@ class LLMAnalyzer:
                 {"role": "user", "content": user_content}
             ],
             "temperature": 0.1,  # Low temperature for more deterministic results
-            "max_tokens": 500,
+            "max_tokens": 1000,  # 増やしてJSONの全体を取得できるようにする
         }
 
         response = requests.post(self.api_url, headers=headers, json=data)
@@ -258,10 +297,15 @@ class LLMAnalyzer:
 
             # Look for guest name
             guest_name_patterns = [
+                # 英語のパターン
                 r"guest name.*?([A-Z][a-z]+(?: [A-Z][a-z]+)+)",
                 r"guest.*?name.*?([A-Z][a-z]+(?: [A-Z][a-z]+)+)",
                 r"guest:?\s+([A-Z][a-z]+(?: [A-Z][a-z]+)+)",
                 r"name of guest.*?([A-Z][a-z]+(?: [A-Z][a-z]+)+)",
+                # 日本語のパターン
+                r"ゲスト名:?\s*([\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}A-Za-z]+(?:\s+[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}A-Za-z]+)*)",
+                r"お客様:?\s*([\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}A-Za-z]+(?:\s+[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}A-Za-z]+)*)",
+                r"予約者:?\s*([\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}A-Za-z]+(?:\s+[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}A-Za-z]+)*)",
             ]
 
             for pattern in guest_name_patterns:
@@ -308,11 +352,16 @@ class LLMAnalyzer:
 
             # Look for property name
             property_name_patterns = [
+                # 英語のパターン
                 r"property name.*?([A-Za-z0-9].*?)(?:\n|$)",
                 r"property:?\s+([A-Za-z0-9].*?)(?:\n|$)",
                 r"listing:?\s+([A-Za-z0-9].*?)(?:\n|$)",
                 r"name of property.*?([A-Za-z0-9].*?)(?:\n|$)",
                 r"booked:?\s+([A-Za-z0-9].*?)(?:\n|$)",
+                # 日本語のパターン
+                r"物件名:?\s*([\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}A-Za-z0-9].*?)(?:\n|$)",
+                r"宿泊先:?\s*([\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}A-Za-z0-9].*?)(?:\n|$)",
+                r"リスティング:?\s*([\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}A-Za-z0-9].*?)(?:\n|$)",
             ]
 
             for pattern in property_name_patterns:
@@ -353,6 +402,7 @@ class LLMAnalyzer:
             Date string in YYYY-MM-DD format, or original string if parsing fails
         """
         try:
+            import re
             # Try various date formats
             formats = [
                 "%Y-%m-%d",  # 2023-04-15
@@ -364,6 +414,16 @@ class LLMAnalyzer:
                 "%d %b %Y",  # 15 Apr 2023
                 "%b %d, %Y",  # Apr 15, 2023
             ]
+
+            # 日本語の日付パターンを抽出するための前処理
+            # 例: "2023年4月15日" -> "2023-04-15"
+            jp_date_pattern = r"(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日"
+            jp_match = re.search(jp_date_pattern, date_str)
+            if jp_match:
+                year = jp_match.group(1)
+                month = jp_match.group(2).zfill(2)  # 1桁の月を2桁に変換（例: 4 -> 04）
+                day = jp_match.group(3).zfill(2)    # 1桁の日を2桁に変換（例: 5 -> 05）
+                return f"{year}-{month}-{day}"
 
             for date_format in formats:
                 try:
