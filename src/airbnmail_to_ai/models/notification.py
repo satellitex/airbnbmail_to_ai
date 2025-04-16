@@ -54,6 +54,12 @@ class AirbnbNotification(BaseModel):
     rating: Optional[int] = None
     review_content: Optional[str] = None
 
+    # LLM analysis results
+    llm_analysis: Optional[Dict[str, Any]] = None
+    llm_check_in_date: Optional[str] = None
+    llm_check_out_date: Optional[str] = None
+    llm_confidence: Optional[str] = None
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert the notification to a dictionary.
 

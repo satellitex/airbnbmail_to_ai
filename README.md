@@ -122,15 +122,21 @@ Airbnbの予約確定メールから宿泊日程を取得し、Google Calendar�
    - Gmail APIと同じOAuth認証情報（credentials.json）が使用できます
 
 2. 初回利用時の認証:
-   ```bash
+```bash
    # calendar コマンドを実行すると初回に認証フローが開始されます
    poetry run airbnmail calendar
-   ```
+```
 
 #### カレンダー連携の実行
 
 ```bash
-# デフォルト設定での実行（未読の予約確定メールを処理）
+# 事前準備：Anthropic APIキーの設定（Claude 3.7 Sonnet を利用）
+export ANTHROPIC_API_KEY="your-anthropic-api-key-here"
+
+# まず解析結果を確認する（カレンダーには追加せず）
+poetry run airbnmail fetch --parse --query "from:automated@airbnb.com subject:予約確定 is:unread"
+
+# 問題なければカレンダーに追加する
 poetry run airbnmail calendar
 
 # カスタム検索クエリの指定
@@ -138,7 +144,12 @@ poetry run airbnmail calendar --query "from:automated@airbnb.com subject:予約�
 
 # 処理したメールを既読にする
 poetry run airbnmail calendar --mark-read
+
+# API キーをコマンドラインで直接指定することも可能
+poetry run airbnmail calendar --api-key="your-anthropic-api-key-here"
 ```
+
+カレンダーイベントは、チェックイン日の16:00からチェックアウト日の12:00までの期間で作成されます。
 
 #### テスト実行（単一メッセージの処理）
 

@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -121,6 +122,7 @@ def fetch_command(args: argparse.Namespace) -> None:
         results = []
         for msg in messages:
             if args.parse:
+                # Parse email with LLM analysis
                 parsed_data = email_parser.parse_email(msg)
                 if parsed_data:
                     results.append(
@@ -178,8 +180,17 @@ def fetch_command(args: argparse.Namespace) -> None:
                 else:
                     output += f"  Parsed Data: {'Successfully parsed' if msg['parsed_data'] else 'Failed to parse'}\n"
                     if msg["parsed_data"]:
+                        # Add general parsed data
                         for key, value in msg["parsed_data"].items():
-                            output += f"    {key}: {value}\n"
+                            if key not in ['llm_analysis'] and value is not None:  # Skip the raw analysis text
+                                output += f"    {key}: {value}\n"
+
+                        # Add reservation analysis section
+                        if 'llm_check_in_date' in msg['parsed_data'] and msg['parsed_data']['llm_check_in_date']:
+                            output += f"  Reservation Analysis:\n"
+                            output += f"    Check-In Date: {msg['parsed_data']['llm_check_in_date']}\n"
+                            output += f"    Check-Out Date: {msg['parsed_data']['llm_check_out_date']}\n"
+                            output += f"    Confidence: {msg['parsed_data']['llm_confidence']}\n"
                 output += "\n"
 
         # Save or print output
@@ -283,6 +294,15 @@ def setup_calendar_parser(subparsers: Any) -> None:
         "--single",
         help="Process only a single email message ID (for testing)",
     )
+    calendar_parser.add_argument(
+        "--use-llm",
+        action="store_true",
+        help="Use LLM to analyze reservation emails for more accurate date extraction",
+    )
+    calendar_parser.add_argument(
+        "--api-key",
+        help="API key for Anthropic Claude API (default: uses ANTHROPIC_API_KEY environment variable)",
+    )
     calendar_parser.set_defaults(func=calendar_command)
 
 
@@ -334,12 +354,18 @@ def calendar_command(args: argparse.Namespace) -> None:
         logger.info(f"Found {len(messages)} booking confirmation emails")
         print(f"Found {len(messages)} booking confirmation emails")
 
+        # Set API key if provided in command line
+        if args.api_key and args.use_llm:
+            # Temporarily set environment variable
+            os.environ["ANTHROPIC_API_KEY"] = args.api_key
+            logger.info("Using provided Anthropic API key")
+
         # Process each message and add to calendar
         success_count = 0
         for msg in messages:
             logger.info(f"Processing email: {msg['subject']}")
 
-            # Parse the email
+            # Parse email with LLM analysis
             notification = email_parser.parse_email(msg)
             if not notification:
                 logger.warning(f"Failed to parse email: {msg['subject']}")
@@ -349,7 +375,16 @@ def calendar_command(args: argparse.Namespace) -> None:
             event_id = calendar.add_booking_to_calendar(notification)
             if event_id:
                 success_count += 1
-                print(f"Added booking to calendar: {notification.get_summary()}")
+
+                # Display LLM analysis results if available
+                if notification.llm_analysis:
+                    print(f"Added booking to calendar: {notification.get_summary()}")
+                    print(f"LLM Analysis Results:")
+                    print(f"  Check-in date: {notification.llm_check_in_date}")
+                    print(f"  Check-out date: {notification.llm_check_out_date}")
+                    print(f"  Confidence: {notification.llm_confidence}")
+                else:
+                    print(f"Added booking to calendar: {notification.get_summary()}")
 
                 # Mark as read if requested
                 if args.mark_read:

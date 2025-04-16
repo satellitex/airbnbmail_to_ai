@@ -111,13 +111,34 @@ class CalendarService:
                 logger.warning("Missing check-in or check-out date in notification")
                 return None
 
-            # Parse dates
-            check_in_date = self.parse_date_from_string(notification.check_in)
-            check_out_date = self.parse_date_from_string(notification.check_out)
+            # First try to use LLM-extracted dates if available and confidence is good
+            if notification.llm_check_in_date and notification.llm_check_out_date and notification.llm_confidence in ["high", "medium"]:
+                logger.info("Using LLM-extracted dates")
+                try:
+                    check_in_date = datetime.datetime.strptime(notification.llm_check_in_date, "%Y-%m-%d")
+                    check_out_date = datetime.datetime.strptime(notification.llm_check_out_date, "%Y-%m-%d")
+                except ValueError:
+                    logger.warning("Failed to parse LLM dates, falling back to regex-extracted dates")
+                    check_in_date = self.parse_date_from_string(notification.check_in)
+                    check_out_date = self.parse_date_from_string(notification.check_out)
+            else:
+                # Parse dates from the regex-extracted fields
+                check_in_date = self.parse_date_from_string(notification.check_in)
+                check_out_date = self.parse_date_from_string(notification.check_out)
 
             if not check_in_date or not check_out_date:
                 logger.error("Failed to parse check-in or check-out dates")
                 return None
+
+            # Add specific times to the dates (check-in at 16:00, check-out at 12:00)
+            check_in_datetime = datetime.datetime.combine(
+                check_in_date.date(),
+                datetime.time(hour=16, minute=0)
+            )
+            check_out_datetime = datetime.datetime.combine(
+                check_out_date.date(),
+                datetime.time(hour=12, minute=0)
+            )
 
             # Create event title and description
             guest_name = notification.guest_name or "Guest"
@@ -140,16 +161,16 @@ class CalendarService:
             if notification.amount and notification.currency:
                 description += f"Amount: {notification.currency}{notification.amount}\n"
 
-            # Create event
+            # Create event with specific check-in and check-out times
             event = {
                 "summary": event_title,
                 "description": description,
                 "start": {
-                    "date": check_in_date.strftime("%Y-%m-%d"),
+                    "dateTime": check_in_datetime.strftime("%Y-%m-%dT%H:%M:%S"),
                     "timeZone": "Asia/Tokyo",
                 },
                 "end": {
-                    "date": check_out_date.strftime("%Y-%m-%d"),
+                    "dateTime": check_out_datetime.strftime("%Y-%m-%dT%H:%M:%S"),
                     "timeZone": "Asia/Tokyo",
                 },
                 "colorId": ORANGE_COLOR_ID,
@@ -169,8 +190,8 @@ class CalendarService:
 
             logger.info(
                 f"Added booking to calendar: {event_title} "
-                f"({check_in_date.strftime('%Y-%m-%d')} to "
-                f"{check_out_date.strftime('%Y-%m-%d')})"
+                f"({check_in_datetime.strftime('%Y-%m-%d %H:%M')} to "
+                f"{check_out_datetime.strftime('%Y-%m-%d %H:%M')})"
             )
 
             return created_event.get("id")
