@@ -111,6 +111,58 @@ poetry run python -m airbnmail_to_ai
 poetry run python -m airbnmail_to_ai --schedule
 ```
 
+### Google Calendar連携
+
+Airbnbの予約確定メールから宿泊日程を取得し、Google Calendarに自動で予定を追加する機能を利用することができます。
+
+#### 事前準備
+
+1. Google Cloud Consoleで Calendar APIを有効化:
+   - 既存のプロジェクトで、"APIとサービス" > "ライブラリ"から「Google Calendar API」を検索して有効化
+   - Gmail APIと同じOAuth認証情報（credentials.json）が使用できます
+
+2. 初回利用時の認証:
+```bash
+   # calendar コマンドを実行すると初回に認証フローが開始されます
+   poetry run airbnmail calendar
+```
+
+#### カレンダー連携の実行
+
+```bash
+# 事前準備：Anthropic APIキーの設定（Claude 3.7 Sonnet を利用）
+export ANTHROPIC_API_KEY="your-anthropic-api-key-here"
+
+# まず解析結果を確認する（カレンダーには追加せず）
+poetry run airbnmail fetch --parse --query "from:automated@airbnb.com subject:予約確定 is:unread"
+
+# 問題なければカレンダーに追加する
+poetry run airbnmail calendar
+
+# カスタム検索クエリの指定
+poetry run airbnmail calendar --query "from:automated@airbnb.com subject:予約確定 after:2023/04/01"
+
+# 処理したメールを既読にする
+poetry run airbnmail calendar --mark-read
+
+# API キーをコマンドラインで直接指定することも可能
+poetry run airbnmail calendar --api-key="your-anthropic-api-key-here"
+```
+
+カレンダーイベントは、チェックイン日の16:00からチェックアウト日の12:00までの期間で作成されます。
+
+#### テスト実行（単一メッセージの処理）
+
+特定のメッセージIDを指定して1件だけテスト処理することも可能です：
+
+```bash
+# まず、fetch コマンドでメールを確認してIDを取得
+poetry run airbnmail fetch --query "from:automated@airbnb.com subject:予約確定 after:2023/04/01" --parse
+
+# 取得したメッセージIDを指定して1件だけカレンダーに追加
+poetry run airbnmail calendar --single MESSAGE_ID
+```
+
 ### CLIでの使用方法
 
 このプロジェクトでは、`automated@airbnb.com`からのメールを取得・操作するためのコマンドラインインターフェース（CLI）が提供されています。
