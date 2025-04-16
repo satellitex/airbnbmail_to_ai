@@ -56,8 +56,6 @@ class AirbnbNotification(BaseModel):
 
     # LLM analysis results
     llm_analysis: Optional[Dict[str, Any]] = None
-    llm_check_in_date: Optional[str] = None
-    llm_check_out_date: Optional[str] = None
     llm_confidence: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -66,7 +64,13 @@ class AirbnbNotification(BaseModel):
         Returns:
             Dictionary representation of the notification.
         """
-        return self.model_dump(exclude_none=True)
+        data = self.model_dump(exclude_none=True)
+
+        # Convert datetime to ISO format string for JSON serialization
+        if "received_at" in data and isinstance(data["received_at"], datetime):
+            data["received_at"] = data["received_at"].isoformat()
+
+        return data
 
     def get_summary(self) -> str:
         """Get a human-readable summary of the notification.

@@ -112,11 +112,14 @@ class CalendarService:
                 return None
 
             # First try to use LLM-extracted dates if available and confidence is good
-            if notification.llm_check_in_date and notification.llm_check_out_date and notification.llm_confidence in ["high", "medium"]:
+            llm_check_in_date = notification.llm_analysis.get('check_in_date') if notification.llm_analysis else None
+            llm_check_out_date = notification.llm_analysis.get('check_out_date') if notification.llm_analysis else None
+
+            if llm_check_in_date and llm_check_out_date and notification.llm_confidence in ["high", "medium"]:
                 logger.info("Using LLM-extracted dates")
                 try:
-                    check_in_date = datetime.datetime.strptime(notification.llm_check_in_date, "%Y-%m-%d")
-                    check_out_date = datetime.datetime.strptime(notification.llm_check_out_date, "%Y-%m-%d")
+                    check_in_date = datetime.datetime.strptime(llm_check_in_date, "%Y-%m-%d")
+                    check_out_date = datetime.datetime.strptime(llm_check_out_date, "%Y-%m-%d")
                 except ValueError:
                     logger.warning("Failed to parse LLM dates, falling back to regex-extracted dates")
                     check_in_date = self.parse_date_from_string(notification.check_in)
@@ -143,8 +146,9 @@ class CalendarService:
             # Create event title and description
             guest_name = notification.guest_name or "Guest"
             property_name = notification.property_name or "Airbnb Booking"
+            num_guests = notification.num_guests or "?"
 
-            event_title = f"Airbnb: {guest_name} at {property_name}"
+            event_title = f"{guest_name} ({num_guests}名) at {property_name}"
 
             description = (
                 f"Airbnb Booking Confirmation\n\n"

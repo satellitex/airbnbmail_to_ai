@@ -186,11 +186,18 @@ def fetch_command(args: argparse.Namespace) -> None:
                                 output += f"    {key}: {value}\n"
 
                         # Add reservation analysis section
-                        if 'llm_check_in_date' in msg['parsed_data'] and msg['parsed_data']['llm_check_in_date']:
-                            output += f"  Reservation Analysis:\n"
-                            output += f"    Check-In Date: {msg['parsed_data']['llm_check_in_date']}\n"
-                            output += f"    Check-Out Date: {msg['parsed_data']['llm_check_out_date']}\n"
-                            output += f"    Confidence: {msg['parsed_data']['llm_confidence']}\n"
+                        if 'llm_analysis' in msg['parsed_data'] and msg['parsed_data']['llm_analysis']:
+                            llm_analysis = msg['parsed_data']['llm_analysis']
+                            check_in_date = llm_analysis.get('check_in_date')
+                            check_out_date = llm_analysis.get('check_out_date')
+                            if check_in_date or check_out_date:
+                                output += f"  Reservation Analysis:\n"
+                                if check_in_date:
+                                    output += f"    Check-In Date: {check_in_date}\n"
+                                if check_out_date:
+                                    output += f"    Check-Out Date: {check_out_date}\n"
+                                if 'llm_confidence' in msg['parsed_data']:
+                                    output += f"    Confidence: {msg['parsed_data']['llm_confidence']}\n"
                 output += "\n"
 
         # Save or print output
@@ -290,10 +297,7 @@ def setup_calendar_parser(subparsers: Any) -> None:
         default="calendar_token.json",
         help="Path to Calendar API token file (default: calendar_token.json)",
     )
-    calendar_parser.add_argument(
-        "--single",
-        help="Process only a single email message ID (for testing)",
-    )
+    # Removed the single parameter as we'll use --limit=1 instead
     calendar_parser.add_argument(
         "--use-llm",
         action="store_true",
@@ -331,20 +335,8 @@ def calendar_command(args: argparse.Namespace) -> None:
             print("Error: Failed to connect to Google Calendar API")
             sys.exit(1)
 
-        # Process a single message if specified
-        if args.single:
-            message_id = args.single
-            logger.info(f"Processing single message with ID: {message_id}")
-            message = gmail.get_message(message_id)
-            if not message:
-                logger.error(f"Message {message_id} not found")
-                print(f"Error: Message {message_id} not found")
-                sys.exit(1)
-
-            messages = [message]
-        else:
-            # Fetch messages matching the query
-            messages = gmail.get_messages(query=args.query, max_results=args.limit)
+        # Fetch messages matching the query
+        messages = gmail.get_messages(query=args.query, max_results=args.limit)
 
         if not messages:
             logger.info("No booking confirmation emails found")
@@ -380,9 +372,19 @@ def calendar_command(args: argparse.Namespace) -> None:
                 if notification.llm_analysis:
                     print(f"Added booking to calendar: {notification.get_summary()}")
                     print(f"LLM Analysis Results:")
-                    print(f"  Check-in date: {notification.llm_check_in_date}")
-                    print(f"  Check-out date: {notification.llm_check_out_date}")
-                    print(f"  Confidence: {notification.llm_confidence}")
+                    if notification.llm_analysis:
+                        check_in_date = notification.llm_analysis.get('check_in_date')
+                        check_out_date = notification.llm_analysis.get('check_out_date')
+                        if check_in_date:
+                            print(f"  Check-in date: {check_in_date}")
+                        if check_out_date:
+                            print(f"  Check-out date: {check_out_date}")
+                        if notification.llm_confidence:
+                            print(f"  Confidence: {notification.llm_confidence}")
+                        print(f"    Guest name: {notification.guest_name}")
+                        print(f"    Reservation ID: {notification.reservation_id}")
+                        print(f"    Property name: {notification.property_name}")
+                        print(f"    Number of guests: {notification.num_guests}")
                 else:
                     print(f"Added booking to calendar: {notification.get_summary()}")
 

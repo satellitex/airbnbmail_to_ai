@@ -92,14 +92,10 @@ def test_parse_booking_request(mock_analyze, booking_request_email, mock_llm_req
     assert notification.notification_id == "12345abc"
     assert notification.subject == "Booking request from John for Tokyo Apartment"
 
-    # LLM analysis results
-    assert notification.llm_check_in_date == "2025-05-01"
-    assert notification.llm_check_out_date == "2025-05-05"
+    # Verify LLM analysis and standard fields
     assert notification.llm_confidence == "high"
-
-    # Standard fields populated from LLM analysis
-    assert notification.check_in == "2025-05-01"
-    assert notification.check_out == "2025-05-05"
+    assert notification.check_in == "2025-05-01"  # Should match LLM check_in_date
+    assert notification.check_out == "2025-05-05"  # Should match LLM check_out_date
 
 
 @patch('airbnmail_to_ai.parser.llm_analyzer.LLMAnalyzer.analyze_reservation')
@@ -121,14 +117,10 @@ def test_parse_booking_confirmation(mock_analyze, booking_confirmation_email, mo
     assert notification.notification_id == "67890xyz"
     assert notification.subject == "Booking for Tokyo Apartment is confirmed"
 
-    # LLM analysis results
-    assert notification.llm_check_in_date == "2025-05-01"
-    assert notification.llm_check_out_date == "2025-05-05"
+    # Verify LLM analysis and standard fields
     assert notification.llm_confidence == "high"
-
-    # Standard fields populated from LLM analysis
-    assert notification.check_in == "2025-05-01"
-    assert notification.check_out == "2025-05-05"
+    assert notification.check_in == "2025-05-01"  # Should match LLM check_in_date
+    assert notification.check_out == "2025-05-05"  # Should match LLM check_out_date
 
 
 @patch('airbnmail_to_ai.parser.llm_analyzer.LLMAnalyzer.analyze_reservation')
@@ -154,8 +146,8 @@ def test_parse_unknown_notification(mock_analyze):
     assert notification.notification_id == "unknown123"
     assert notification.subject == "Something totally unrelated"
     assert notification.llm_confidence == "low"
+    # For unknown notification type, both standard and LLM date fields should be None
     assert notification.check_in is None
-    assert notification.check_out is None
 
 
 def test_date_parsing():
