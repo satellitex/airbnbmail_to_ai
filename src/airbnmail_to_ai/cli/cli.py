@@ -9,6 +9,7 @@ from loguru import logger
 from airbnmail_to_ai.cli.commands import (
     list_commands,
     setup_auth_parser,
+    setup_calendar_parser,
     setup_fetch_parser,
 )
 
@@ -61,6 +62,7 @@ def create_parser() -> argparse.ArgumentParser:
     # Setup command subparsers
     setup_fetch_parser(subparsers)
     setup_auth_parser(subparsers)
+    setup_calendar_parser(subparsers)
 
     return parser
 
