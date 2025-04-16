@@ -79,6 +79,17 @@ class GmailService:
             logger.exception(f"Failed to build Gmail service: {e}")
             raise
 
+    def get_message(self, msg_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single message by ID.
+
+        Args:
+            msg_id: The ID of the message.
+
+        Returns:
+            Dictionary with message details or None if an error occurs.
+        """
+        return self._get_message_detail(msg_id)
+
     def get_messages(
         self, query: str = "from:airbnb.com is:unread", max_results: int = 50
     ) -> List[Dict[str, Any]]:
