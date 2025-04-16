@@ -1,0 +1,84 @@
+[tool.poetry]
+name = "airbnmail-to-ai"
+version = "0.1.0"
+description = "Airbnb notification email processing bot"
+authors = ["Example User <user@example.com>"]
+readme = "README.md"
+packages = [{include = "airbnmail_to_ai", from = "src"}]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<4.0"
+google-api-python-client = "^2.118.0"
+google-auth-oauthlib = "^1.2.0"
+pyyaml = "^6.0.1"
+requests = "^2.31.0"
+schedule = "^1.2.1"
+pydantic = "^2.6.0"
+nltk = "^3.8.1"
+python-dotenv = "^1.0.1"
+loguru = "^0.7.2"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.4.5"
+mypy = "^1.9.0"
+pytest = "^8.0.0"
+pytest-cov = "^4.1.0"
+pre-commit = "^3.6.0"
+types-pyyaml = "^6.0.12.12"
+types-requests = "^2.31.0.10"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "D",   # pydocstyle
+    "TCH", # type-checking
+    "RUF", # ruff-specific rules
+]
+ignore = ["D203", "D212"]
+unfixable = ["F401"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+skip-magic-trailing-comma = false
+
+[tool.ruff.pydocstyle]
+convention = "google"
+
+[tool.ruff.isort]
+known-first-party = ["airbnmail_to_ai"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+strict_optional = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+python_classes = "Test*"

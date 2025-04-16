@@ -1,0 +1,61 @@
+# Airbnb Mail to AI Configuration Example
+# Copy this file to config.yaml and customize for your setup
+
+# Gmail API credentials
+credentials_path: "credentials.json"
+token_path: "token.json"
+
+# Gmail search query to find Airbnb emails
+# See https://support.google.com/mail/answer/7190 for search operators
+gmail_query: "from:airbnb.com is:unread"
+
+# Mark emails as read after processing
+mark_as_read: true
+
+# Schedule configuration for automated runs
+schedule:
+  interval: 30  # Time value
+  unit: minutes  # minutes, hours, or days
+
+# Services configuration
+services:
+  # Global services applied to all notification types
+  all:
+    webhook:
+      enabled: true
+      url: "https://example.com/webhook"
+      method: "POST"
+      headers:
+        Content-Type: "application/json"
+        Authorization: "Bearer YOUR_API_KEY"
+      timeout: 10  # Seconds
+      include_raw: false  # Whether to include raw email text/html
+
+  # Notification type specific services
+  booking_request:
+    webhook:
+      enabled: true
+      url: "https://example.com/booking-webhook"
+      # Template to map notification fields to webhook payload
+      template:
+        id: "notification_id"
+        type: "notification_type"
+        guest: "guest_name"
+        check_in: "check_in"
+        check_out: "check_out"
+        guests: "num_guests"
+        property: "property_name"
+
+  booking_confirmation:
+    webhook:
+      url: "https://example.com/confirmation-webhook"
+
+  cancellation:
+    webhook:
+      url: "https://example.com/cancellation-webhook"
+
+  message:
+    webhook:
+      url: "https://example.com/message-webhook"
+      # Enable sending raw content for messages
+      include_raw: true
