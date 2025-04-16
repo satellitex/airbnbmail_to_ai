@@ -92,6 +92,8 @@ poetry run python -m airbnmail_to_ai.auth.gmail_auth
 
 ## 使用方法
 
+### 通常の実行モード
+
 1. 設定ファイルの編集:
 
 ```bash
@@ -108,6 +110,91 @@ poetry run python -m airbnmail_to_ai
 # または設定されたスケジュールでの実行
 poetry run python -m airbnmail_to_ai --schedule
 ```
+
+### CLIでの使用方法
+
+このプロジェクトでは、`automated@airbnb.com`からのメールを取得・操作するためのコマンドラインインターフェース（CLI）が提供されています。
+
+#### 基本的な使い方
+
+```bash
+# ヘルプの表示
+poetry run airbnmail --help
+
+# Gmail APIの認証
+poetry run airbnmail auth
+
+# メールの取得（デフォルトでは未読のautomated@airbnb.comからのメール）
+poetry run airbnmail fetch
+
+# 詳細なオプションの表示
+poetry run airbnmail fetch --help
+```
+
+#### 認証方法
+
+最初に認証を行う必要があります：
+
+```bash
+# デフォルトの認証情報ファイルを使用
+poetry run airbnmail auth
+
+# カスタム認証情報ファイルを指定
+poetry run airbnmail auth --credentials path/to/credentials.json
+```
+
+#### メール検索のカスタマイズ
+
+特定の検索クエリを使用してメールを取得：
+
+```bash
+# カスタム検索クエリを使用（Gmail検索構文）
+poetry run airbnmail fetch --query "from:automated@airbnb.com subject:予約 after:2023/01/01"
+
+# 取得するメール数を制限
+poetry run airbnmail fetch --limit 5
+
+# 取得後にメールを既読にマーク
+poetry run airbnmail fetch --mark-read
+```
+
+#### 出力形式のカスタマイズ
+
+```bash
+# JSON形式で出力
+poetry run airbnmail fetch --output json
+
+# YAML形式で出力
+poetry run airbnmail fetch --output yaml
+
+# 結果をファイルに保存
+poetry run airbnmail fetch --save results.txt
+poetry run airbnmail fetch --output json --save results.json
+```
+
+#### メール内容の解析
+
+```bash
+# メール内容をAirbnb通知データとして解析
+poetry run airbnmail fetch --parse
+```
+
+#### 使用例
+
+1. 最新の5件のAirbnbメールを取得してJSONファイルに保存：
+   ```bash
+   poetry run airbnmail fetch --limit 5 --output json --save airbnb_emails.json
+   ```
+
+2. 特定期間の予約関連メールを検索して解析：
+   ```bash
+   poetry run airbnmail fetch --query "from:automated@airbnb.com subject:予約 after:2023/04/01 before:2023/05/01" --parse
+   ```
+
+3. すべての未読Airbnbメールを取得して既読にマーク：
+   ```bash
+   poetry run airbnmail fetch --mark-read
+   ```
 
 ## テスト実行
 
