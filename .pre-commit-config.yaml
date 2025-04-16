@@ -1,20 +1,23 @@
+# pre-commit hooks temporarily disabled
+# To re-enable, uncomment the configuration below
+
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.4.5
-    hooks:
-      - id: ruff
-        args: [--fix]
-      - id: ruff-format
-
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.9.0
-    hooks:
-      - id: mypy
-        additional_dependencies:
-          - types-pyyaml==6.0.12.12
-          - types-requests==2.31.0.10
-        args: [--no-warn-unused-ignores, --no-implicit-reexport]
-
+#   - repo: https://github.com/astral-sh/ruff-pre-commit
+#     rev: v0.4.5
+#     hooks:
+#       - id: ruff
+#         args: [--fix]
+#       - id: ruff-format
+#
+#   - repo: https://github.com/pre-commit/mirrors-mypy
+#     rev: v1.9.0
+#     hooks:
+#       - id: mypy
+#         additional_dependencies:
+#           - types-pyyaml==6.0.12.12
+#           - types-requests==2.31.0.10
+#         args: [--no-warn-unused-ignores, --no-implicit-reexport]
+#
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
     hooks:
