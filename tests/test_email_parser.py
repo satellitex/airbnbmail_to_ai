@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from airbnmail_to_ai.models.notification import NotificationType
-from airbnmail_to_ai.parser.email_parser import parse_email, _parse_date
+from airbnmail_to_ai.parser.email_parser import parse_email, parse_email_date
 
 
 @pytest.fixture
@@ -55,8 +55,13 @@ def booking_confirmation_email():
 def mock_llm_request_response():
     """Mock LLM analyzer response for booking request."""
     return {
+        "notification_type": "booking_request",
         "check_in_date": "2025-05-01",
         "check_out_date": "2025-05-05",
+        "received_date": "2025-04-15",
+        "guest_name": "John",
+        "num_guests": 2,
+        "property_name": "Tokyo Apartment",
         "confidence": "high",
         "analysis": "I found the check-in date (2025-05-01) and check-out date (2025-05-05) with high confidence."
     }
@@ -66,14 +71,19 @@ def mock_llm_request_response():
 def mock_llm_confirmation_response():
     """Mock LLM analyzer response for booking confirmation."""
     return {
+        "notification_type": "booking_confirmation",
         "check_in_date": "2025-05-01",
         "check_out_date": "2025-05-05",
+        "received_date": "2025-04-16",
+        "guest_name": None,
+        "num_guests": None,
+        "property_name": "Tokyo Apartment",
         "confidence": "high",
         "analysis": "I found the check-in date (2025-05-01) and check-out date (2025-05-05) with high confidence."
     }
 
 
-@patch('airbnmail_to_ai.parser.llm_analyzer.LLMAnalyzer.analyze_reservation')
+@patch('airbnmail_to_ai.parser.llm.LLMAnalyzer.analyze_reservation')
 def test_parse_booking_request(mock_analyze, booking_request_email, mock_llm_request_response):
     """Test parsing a booking request email."""
     # Configure the mock
@@ -83,8 +93,7 @@ def test_parse_booking_request(mock_analyze, booking_request_email, mock_llm_req
     notification = parse_email(booking_request_email)
 
     # Check that LLM analyzer was called with correct arguments
-    mock_analyze.assert_called_once()
-    assert booking_request_email["body_text"] in mock_analyze.call_args[0]
+    mock_analyze.assert_called_once_with(booking_request_email)
 
     # Basic assertions
     assert notification is not None
@@ -96,9 +105,12 @@ def test_parse_booking_request(mock_analyze, booking_request_email, mock_llm_req
     assert notification.llm_confidence == "high"
     assert notification.check_in == "2025-05-01"  # Should match LLM check_in_date
     assert notification.check_out == "2025-05-05"  # Should match LLM check_out_date
+    assert notification.guest_name == "John"
+    assert notification.num_guests == 2
+    assert notification.property_name == "Tokyo Apartment"
 
 
-@patch('airbnmail_to_ai.parser.llm_analyzer.LLMAnalyzer.analyze_reservation')
+@patch('airbnmail_to_ai.parser.llm.LLMAnalyzer.analyze_reservation')
 def test_parse_booking_confirmation(mock_analyze, booking_confirmation_email, mock_llm_confirmation_response):
     """Test parsing a booking confirmation email."""
     # Configure the mock
@@ -108,8 +120,7 @@ def test_parse_booking_confirmation(mock_analyze, booking_confirmation_email, mo
     notification = parse_email(booking_confirmation_email)
 
     # Check that LLM analyzer was called with correct arguments
-    mock_analyze.assert_called_once()
-    assert booking_confirmation_email["body_text"] in mock_analyze.call_args[0]
+    mock_analyze.assert_called_once_with(booking_confirmation_email)
 
     # Basic assertions
     assert notification is not None
@@ -121,13 +132,15 @@ def test_parse_booking_confirmation(mock_analyze, booking_confirmation_email, mo
     assert notification.llm_confidence == "high"
     assert notification.check_in == "2025-05-01"  # Should match LLM check_in_date
     assert notification.check_out == "2025-05-05"  # Should match LLM check_out_date
+    assert notification.property_name == "Tokyo Apartment"
 
 
-@patch('airbnmail_to_ai.parser.llm_analyzer.LLMAnalyzer.analyze_reservation')
+@patch('airbnmail_to_ai.parser.llm.LLMAnalyzer.analyze_reservation')
 def test_parse_unknown_notification(mock_analyze):
     """Test parsing an email with unknown notification type."""
     # Configure the mock to return empty results
     mock_analyze.return_value = {
+        "notification_type": "unknown",
         "check_in_date": None,
         "check_out_date": None,
         "confidence": "low",
@@ -154,7 +167,7 @@ def test_date_parsing():
     """Test date parsing from email headers."""
     # Test standard format
     date_str = "Mon, 15 Apr 2025 12:34:56 +0900"
-    parsed_date = _parse_date(date_str)
+    parsed_date = parse_email_date(date_str)
     assert isinstance(parsed_date, datetime)
     assert parsed_date.year == 2025
     assert parsed_date.month == 4
@@ -162,7 +175,7 @@ def test_date_parsing():
 
     # Test invalid format
     invalid_date = "Not a real date"
-    assert _parse_date(invalid_date) is None
+    assert parse_email_date(invalid_date) is None
 
     # Test empty string
-    assert _parse_date("") is None
+    assert parse_email_date("") is None

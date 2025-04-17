@@ -1,10 +1,11 @@
 """Tests for the LLM analyzer module."""
 
-import os
 import unittest
 from unittest.mock import patch, MagicMock
 
-from airbnmail_to_ai.parser.llm_analyzer import LLMAnalyzer
+from airbnmail_to_ai.parser.llm import LLMAnalyzer
+from airbnmail_to_ai.parser.llm.date_utils import normalize_date
+from airbnmail_to_ai.parser.llm.response_parser import parse_llm_response
 
 
 class TestLLMAnalyzer(unittest.TestCase):
@@ -13,23 +14,27 @@ class TestLLMAnalyzer(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         self.analyzer = LLMAnalyzer(api_key="test_key")
-        self.sample_email = """
-        予約確定: Hideaway Chalet for Jun 15–20, 2025
+        self.sample_email = {
+            "subject": "予約確定: Hideaway Chalet for Jun 15–20, 2025",
+            "date": "2025-04-15",
+            "from": "Airbnb <automated@airbnb.com>",
+            "to": "guest@example.com",
+            "body_text": """
+            Hideaway Chalet
+            東京都新宿区
 
-        Hideaway Chalet
-        東京都新宿区
+            チェックイン: 2025年6月15日（日）
+            チェックアウト: 2025年6月20日（金）
+            ゲスト: 2名
 
-        チェックイン: 2025年6月15日（日）
-        チェックアウト: 2025年6月20日（金）
-        ゲスト: 2名
+            予約コード: ABCDEF123
 
-        予約コード: ABCDEF123
+            合計金額: ¥65,000
 
-        合計金額: ¥65,000
-
-        ホストからのメッセージ:
-        ご予約ありがとうございます。心からお待ちしております。
-        """
+            ホストからのメッセージ:
+            ご予約ありがとうございます。心からお待ちしております。
+            """
+        }
 
     @patch('requests.post')
     def test_analyze_reservation_with_api(self, mock_post):
@@ -40,10 +45,18 @@ class TestLLMAnalyzer(unittest.TestCase):
             "content": [
                 {
                     "text": """
-                    Based on the email content, I've extracted the following information:
-
-                    Check-in date: 2025-06-15
-                    Check-out date: 2025-06-20
+                    ```json
+                    {
+                      "notification_type": "booking_confirmation",
+                      "check_in_date": "2025-06-15",
+                      "check_out_date": "2025-06-20",
+                      "received_date": "2025-04-15",
+                      "guest_name": null,
+                      "num_guests": 2,
+                      "property_name": "Hideaway Chalet",
+                      "confidence": "high"
+                    }
+                    ```
                     """
                 }
             ]
@@ -64,19 +77,34 @@ class TestLLMAnalyzer(unittest.TestCase):
         # Verify the results
         self.assertEqual(result['check_in_date'], '2025-06-15')
         self.assertEqual(result['check_out_date'], '2025-06-20')
-        self.assertIsNotNone(result['confidence'])
+        self.assertEqual(result['notification_type'], 'booking_confirmation')
+        self.assertEqual(result['num_guests'], 2)
+        self.assertEqual(result['property_name'], 'Hideaway Chalet')
+        self.assertEqual(result['confidence'], 'high')
         self.assertIsNotNone(result['analysis'])
 
-    def test_analyze_reservation_no_api_key(self):
+    @patch('requests.post')
+    @patch('os.environ.get')
+    def test_analyze_reservation_no_api_key(self, mock_env_get, mock_post):
         """Test analyzing reservation without API key (mock mode)."""
+        # Ensure environment variable also returns None
+        mock_env_get.return_value = None
+
+        # Create analyzer with no API key
         analyzer = LLMAnalyzer(api_key=None)
+
+        # Call the method - should use the mock response path
         result = analyzer.analyze_reservation(self.sample_email)
 
-        # In mock mode, we should still get a response but with None dates
-        self.assertIsNone(result['check_in_date'])
-        self.assertIsNone(result['check_out_date'])
-        self.assertEqual(result['confidence'], 'low')
-        self.assertIsNotNone(result['analysis'])
+        # Verify mock_post was not called (no API call should be made)
+        mock_post.assert_not_called()
+
+        # In mock mode, we should get the placeholder response
+        self.assertIsNone(result.get('check_in_date'))
+        self.assertIsNone(result.get('check_out_date'))
+        self.assertEqual(result.get('confidence', ''), 'low')
+        self.assertEqual(result.get('notification_type', ''), 'unknown')
+        self.assertIsNotNone(result.get('analysis'))
 
     def test_normalize_date(self):
         """Test date normalization function."""
@@ -88,33 +116,56 @@ class TestLLMAnalyzer(unittest.TestCase):
             ("June 15, 2025", "2025-06-15"),  # Month DD, YYYY
             ("15 Jun 2025", "2025-06-15"),  # DD MMM YYYY
             ("Jun 15, 2025", "2025-06-15"),  # MMM DD, YYYY
+            ("2025年6月15日", "2025-06-15"),  # Japanese format
         ]
 
         for input_date, expected_output in test_cases:
-            result = self.analyzer._normalize_date(input_date)
+            result = normalize_date(input_date)
             self.assertEqual(result, expected_output, f"Failed to normalize {input_date}")
 
     def test_parse_llm_response(self):
         """Test parsing LLM response text."""
-        # Test with clear check-in/check-out indicators
-        response1 = "Check-in date: 2025-06-15\nCheck-out date: 2025-06-20"
-        result1 = self.analyzer._parse_llm_response(response1)
+        # Test with JSON format
+        response1 = """
+        ```json
+        {
+          "notification_type": "booking_confirmation",
+          "check_in_date": "2025-06-15",
+          "check_out_date": "2025-06-20",
+          "received_date": "2025-04-15",
+          "guest_name": null,
+          "num_guests": 2,
+          "property_name": "Hideaway Chalet",
+          "confidence": "high"
+        }
+        ```
+        """
+        result1 = parse_llm_response(response1)
         self.assertEqual(result1['check_in_date'], '2025-06-15')
         self.assertEqual(result1['check_out_date'], '2025-06-20')
+        self.assertEqual(result1['notification_type'], 'booking_confirmation')
         self.assertEqual(result1['confidence'], 'high')
 
+        # Test with clear check-in/check-out indicators but no JSON
+        response2 = "Check-in date: 2025-06-15\nCheck-out date: 2025-06-20"
+        result2 = parse_llm_response(response2)
+        self.assertEqual(result2['check_in_date'], '2025-06-15')
+        self.assertEqual(result2['check_out_date'], '2025-06-20')
+        self.assertEqual(result2['confidence'], 'high')
+
         # Test with only YYYY-MM-DD dates, no clear indicators
-        response2 = "I found dates in the email: 2025-06-15 to 2025-06-20"
-        result2 = self.analyzer._parse_llm_response(response2)
-        self.assertIsNotNone(result2['check_in_date'])
-        self.assertIsNotNone(result2['check_out_date'])
+        response3 = "I found dates in the email: 2025-06-15 to 2025-06-20"
+        result3 = parse_llm_response(response3)
+        self.assertIsNotNone(result3['check_in_date'])
+        self.assertIsNotNone(result3['check_out_date'])
+        self.assertIn(result3['confidence'], ['medium', 'low'])
 
         # Test with no dates
-        response3 = "I couldn't find any specific dates in the email."
-        result3 = self.analyzer._parse_llm_response(response3)
-        self.assertIsNone(result3['check_in_date'])
-        self.assertIsNone(result3['check_out_date'])
-        self.assertEqual(result3['confidence'], 'low')
+        response4 = "I couldn't find any specific dates in the email."
+        result4 = parse_llm_response(response4)
+        self.assertIsNone(result4['check_in_date'])
+        self.assertIsNone(result4['check_out_date'])
+        self.assertEqual(result4['confidence'], 'low')
 
 
 if __name__ == '__main__':

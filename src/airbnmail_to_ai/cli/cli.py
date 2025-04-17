@@ -4,8 +4,6 @@ import argparse
 import sys
 from typing import List, Optional
 
-from loguru import logger
-
 from airbnmail_to_ai.cli.commands import (
     list_commands,
     setup_auth_parser,
@@ -13,23 +11,10 @@ from airbnmail_to_ai.cli.commands import (
     setup_db_parser,
     setup_fetch_parser,
 )
+from airbnmail_to_ai.utils.logging import get_logger, setup_logger
 
-
-def setup_logging(log_level: str = "INFO") -> None:
-    """Configure application logging.
-
-    Args:
-        log_level: The logging level to use. Defaults to "INFO".
-    """
-    # Remove default handler
-    logger.remove()
-
-    # Add console handler
-    logger.add(
-        sys.stderr,
-        level=log_level,
-        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-    )
+# Initialize logger
+logger = get_logger(__name__)
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -82,7 +67,7 @@ def main(args: list[str] | None = None) -> int:
     parsed_args = parser.parse_args(args)
 
     # Setup logging
-    setup_logging(parsed_args.log_level)
+    setup_logger(log_level=parsed_args.log_level)
 
     # If no command provided, show help
     if not hasattr(parsed_args, "func"):
