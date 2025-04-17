@@ -1,14 +1,17 @@
 """Module for parsing Airbnb email notifications using LLM."""
 
 import os
+import re
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from loguru import logger
-
 from airbnmail_to_ai.models.notification import AirbnbNotification, NotificationType
-from airbnmail_to_ai.parser.llm_analyzer import LLMAnalyzer
+from airbnmail_to_ai.parser.llm import LLMAnalyzer
+from airbnmail_to_ai.parser.llm.date_utils import normalize_date
+from airbnmail_to_ai.utils.logging import get_logger
 
+# Initialize logger
+logger = get_logger(__name__)
 
 # Initialize LLM Analyzer
 llm_analyzer = LLMAnalyzer(api_key=os.environ.get("ANTHROPIC_API_KEY"))
@@ -24,6 +27,8 @@ def parse_email(email: Dict[str, Any]) -> Optional[AirbnbNotification]:
         AirbnbNotification object or None if parsing fails.
     """
     try:
+        logger.info("Parsing email with subject: {}", email.get("subject", ""))
+
         # Extract basic email metadata
         email_id = email.get("id", "")
         subject = email.get("subject", "")
@@ -32,22 +37,15 @@ def parse_email(email: Dict[str, Any]) -> Optional[AirbnbNotification]:
         # Use LLM to analyze complete email (including metadata)
         llm_results = llm_analyzer.analyze_reservation(email)
 
+        logger.debug("LLM analysis results: {}",
+                    {k: v for k, v in llm_results.items() if k != 'analysis'})
+
         # Get notification type from LLM analysis
         llm_notification_type = llm_results.get("notification_type", "unknown")
-        notification_type = getattr(NotificationType, llm_notification_type.upper(), NotificationType.UNKNOWN)
+        notification_type = get_notification_type(llm_notification_type, subject)
 
         # Create a datetime object from the LLM-parsed received date if available
-        llm_received_date = llm_results.get("received_date")
-        received_at = None
-        if llm_received_date:
-            try:
-                received_at = datetime.strptime(llm_received_date, "%Y-%m-%d")
-            except (ValueError, TypeError):
-                # Fallback to standard parsing if LLM parsing fails
-                received_at = _parse_date(email.get("date", ""))
-        else:
-            # Fallback to standard parsing if LLM didn't extract a date
-            received_at = _parse_date(email.get("date", ""))
+        received_at = get_received_datetime(llm_results, email)
 
         # Create notification data with basic fields
         notification_data = {
@@ -68,38 +66,94 @@ def parse_email(email: Dict[str, Any]) -> Optional[AirbnbNotification]:
             "check_in": llm_results.get("check_in_date"),
             "check_out": llm_results.get("check_out_date"),
             "guest_name": llm_results.get("guest_name"),
-            "num_guests": llm_results.get("num_guests"),
             "property_name": llm_results.get("property_name"),
         }
 
-        # Set number of guests, converting to int if present
-        if llm_results.get("num_guests") is not None:
-            try:
-                notification_data["num_guests"] = int(llm_results.get("num_guests"))
-            except (ValueError, TypeError):
-                # Fallback to extracting from the email text if LLM parsing fails
-                if "guest" in body_text.lower():
-                    for line in body_text.split("\n"):
-                        if "guest" in line.lower():
-                            # Try to get number of guests if mentioned
-                            try:
-                                parts = line.split()
-                                for i, part in enumerate(parts):
-                                    if part.isdigit() and i > 0 and "guest" in parts[i+1].lower():
-                                        notification_data["num_guests"] = int(part)
-                                        break
-                            except (IndexError, ValueError):
-                                pass
+        # Process number of guests
+        notification_data["num_guests"] = extract_num_guests(llm_results, body_text)
 
         # Create and return the notification object
+        logger.info("Successfully parsed email into notification")
         return AirbnbNotification(**notification_data)
 
     except Exception as e:
-        logger.exception(f"Error parsing email: {e}")
+        logger.exception("Error parsing email: {}", e)
         return None
 
 
-def _identify_notification_type(subject: str) -> NotificationType:
+def get_notification_type(llm_type: str, subject: str) -> NotificationType:
+    """Get notification type from LLM analysis or fallback to subject-based detection.
+
+    Args:
+        llm_type: Notification type from LLM analysis
+        subject: Email subject line
+
+    Returns:
+        NotificationType enum value
+    """
+    try:
+        # Try to get from LLM first
+        return NotificationType[llm_type.upper()]
+    except (KeyError, AttributeError):
+        # Fallback to subject-based identification
+        return identify_notification_type_from_subject(subject)
+
+
+def get_received_datetime(llm_results: Dict[str, Any], email: Dict[str, Any]) -> Optional[datetime]:
+    """Get received datetime from LLM analysis or fallback to email date.
+
+    Args:
+        llm_results: Results from LLM analysis
+        email: Email data dictionary
+
+    Returns:
+        datetime object or None
+    """
+    llm_received_date = llm_results.get("received_date")
+
+    if llm_received_date:
+        try:
+            return datetime.strptime(llm_received_date, "%Y-%m-%d")
+        except (ValueError, TypeError):
+            logger.warning("Failed to parse LLM received date: {}", llm_received_date)
+
+    # Fallback to standard parsing
+    return parse_email_date(email.get("date", ""))
+
+
+def extract_num_guests(llm_results: Dict[str, Any], body_text: str) -> Optional[int]:
+    """Extract number of guests from LLM results or fallback to text parsing.
+
+    Args:
+        llm_results: Results from LLM analysis
+        body_text: Email body text
+
+    Returns:
+        Integer number of guests or None
+    """
+    if llm_results.get("num_guests") is not None:
+        try:
+            return int(llm_results.get("num_guests"))
+        except (ValueError, TypeError):
+            logger.warning("Failed to parse LLM num_guests: {}", llm_results.get("num_guests"))
+
+    # Fallback to extracting from email text
+    if "guest" in body_text.lower():
+        for line in body_text.split("\n"):
+            if "guest" in line.lower():
+                # Try to get number of guests if mentioned
+                try:
+                    parts = line.split()
+                    for i, part in enumerate(parts):
+                        if part.isdigit() and i > 0 and "guest" in parts[i+1].lower():
+                            return int(part)
+                except (IndexError, ValueError):
+                    pass
+
+    return None
+
+
+def identify_notification_type_from_subject(subject: str) -> NotificationType:
     """Identify the notification type based on the email subject.
 
     Args:
@@ -110,31 +164,28 @@ def _identify_notification_type(subject: str) -> NotificationType:
     """
     subject_lower = subject.lower()
 
-    if any(keyword in subject_lower for keyword in ["booking request", "reservation request"]):
-        return NotificationType.BOOKING_REQUEST
+    logger.debug("Identifying notification type from subject: {}", subject)
 
-    if any(keyword in subject_lower for keyword in ["confirmed", "confirmation", "booked"]):
-        return NotificationType.BOOKING_CONFIRMATION
+    notification_keywords = {
+        NotificationType.BOOKING_REQUEST: ["booking request", "reservation request"],
+        NotificationType.BOOKING_CONFIRMATION: ["confirmed", "confirmation", "booked", "予約確定"],
+        NotificationType.CANCELLATION: ["cancelled", "canceled", "cancellation"],
+        NotificationType.MESSAGE: ["message", "sent you"],
+        NotificationType.REVIEW: ["review", "feedback"],
+        NotificationType.REMINDER: ["reminder", "checkout", "checkin"],
+        NotificationType.PAYMENT: ["payout", "payment"],
+    }
 
-    if any(keyword in subject_lower for keyword in ["cancelled", "canceled", "cancellation"]):
-        return NotificationType.CANCELLATION
+    for notification_type, keywords in notification_keywords.items():
+        if any(keyword in subject_lower for keyword in keywords):
+            logger.debug("Identified notification type: {}", notification_type)
+            return notification_type
 
-    if any(keyword in subject_lower for keyword in ["message", "sent you"]):
-        return NotificationType.MESSAGE
-
-    if any(keyword in subject_lower for keyword in ["review", "feedback"]):
-        return NotificationType.REVIEW
-
-    if any(keyword in subject_lower for keyword in ["reminder", "checkout", "checkin"]):
-        return NotificationType.REMINDER
-
-    if any(keyword in subject_lower for keyword in ["payout", "payment"]):
-        return NotificationType.PAYMENT
-
+    logger.debug("Could not identify notification type, defaulting to UNKNOWN")
     return NotificationType.UNKNOWN
 
 
-def _parse_date(date_str: str) -> Optional[datetime]:
+def parse_email_date(date_str: str) -> Optional[datetime]:
     """Parse a date string into a datetime object.
 
     Args:
@@ -145,6 +196,8 @@ def _parse_date(date_str: str) -> Optional[datetime]:
     """
     if not date_str:
         return None
+
+    logger.debug("Parsing email date: {}", date_str)
 
     # Common email date formats
     date_formats = [
@@ -171,7 +224,6 @@ def _parse_date(date_str: str) -> Optional[datetime]:
             continue
 
     # Try extracting just the date part using regex
-    import re
     date_patterns = [
         r'(\d{4}-\d{2}-\d{2})',                                           # 2025-04-14
         r'(\d{1,2})\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})',  # 14 Apr 2025
@@ -196,5 +248,5 @@ def _parse_date(date_str: str) -> Optional[datetime]:
             except (ValueError, AttributeError):
                 continue
 
-    logger.warning(f"Could not parse date: {date_str}")
+    logger.warning("Could not parse date: {}", date_str)
     return None

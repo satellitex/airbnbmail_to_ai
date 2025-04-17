@@ -7,9 +7,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from loguru import logger
-
 from airbnmail_to_ai.models.notification import AirbnbNotification, NotificationType
+from airbnmail_to_ai.utils.logging import get_logger
+
+# Initialize logger
+logger = get_logger(__name__)
 
 
 class DatabaseService:
