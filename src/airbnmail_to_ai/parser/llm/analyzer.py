@@ -1,12 +1,15 @@
 """LLM-based analyzer for Airbnb reservation emails."""
 
 import os
+import re
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 import requests
 
 from airbnmail_to_ai.parser.llm.prompts import DEFAULT_SYSTEM_PROMPT
 from airbnmail_to_ai.parser.llm.response_parser import parse_llm_response
+from airbnmail_to_ai.parser.llm.date_utils import normalize_date
 from airbnmail_to_ai.utils.logging import get_logger
 
 # Initialize logger
@@ -33,9 +36,9 @@ class LLMAnalyzer:
         self.api_url = api_url
         self.model = model
 
-        logger.debug("Initialized LLM analyzer with model: {}", model)
-        logger.debug("API URL: {}", api_url)
-        logger.debug("API key provided: {}", bool(self.api_key))
+        logger.debug("Initialized LLM analyzer with Claude model: {}", model)
+        logger.debug("Anthropic API URL: {}", api_url)
+        logger.debug("Anthropic API key provided: {}", bool(self.api_key))
 
     def analyze_reservation(
         self, email_data: Dict[str, Any], system_prompt: Optional[str] = None
@@ -59,36 +62,112 @@ class LLMAnalyzer:
             system_prompt = DEFAULT_SYSTEM_PROMPT
 
         try:
+            # Extract the received year from the email date if available
+            received_year = None
+            if email_data.get('date'):
+                date_match = re.search(r'(\d{4})', email_data.get('date', ''))
+                if date_match:
+                    received_year = date_match.group(1)
+
+            # Clean HTML from body if it contains HTML tags
+            body_text = email_data.get('body_text', '')
+            if re.search(r'<[^>]+>', body_text):
+                logger.debug("HTML detected in email body, cleaning...")
+                body_text = self._clean_html(body_text)
+
             # Prepare a comprehensive email summary with all available metadata
-            email_summary = self._prepare_email_summary(email_data)
+            email_summary = self._prepare_email_summary(email_data, body_text)
 
             # Prepare messages for the LLM
             messages = [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Extract information from this Airbnb email:\n\n{email_summary}"},
+                {"role": "user", "content": f"<<EMAIL_HTML>>\n{email_summary}"},
             ]
 
-            # Call LLM API or local model
-            result = self._call_llm_api(messages)
+            # Call Claude API
+            result = self._call_anthropic_api(messages)
 
             # Parse the response
-            return parse_llm_response(result)
+            parsed_result = parse_llm_response(result)
+
+            # Normalize dates with received year context
+            if 'check_in_date' in parsed_result and parsed_result['check_in_date']:
+                parsed_result['check_in_date'] = normalize_date(
+                    parsed_result['check_in_date'],
+                    received_year
+                )
+
+            if 'check_out_date' in parsed_result and parsed_result['check_out_date']:
+                parsed_result['check_out_date'] = normalize_date(
+                    parsed_result['check_out_date'],
+                    received_year
+                )
+
+            if 'received_date' in parsed_result and parsed_result['received_date']:
+                parsed_result['received_date'] = normalize_date(
+                    parsed_result['received_date'],
+                    received_year
+                )
+
+            return parsed_result
 
         except Exception as e:
             logger.exception("Error in LLM analysis: {}", e)
             return {
+                "notification_type": "unknown",
                 "check_in_date": None,
                 "check_out_date": None,
+                "received_date": None,
+                "guest_name": None,
+                "num_guests": None,
+                "property_name": None,
                 "confidence": "low",
                 "analysis": f"Error occurred during analysis: {str(e)}",
                 "error": str(e),
             }
 
-    def _prepare_email_summary(self, email_data: Dict[str, Any]) -> str:
+    def _clean_html(self, html_text: str) -> str:
+        """Clean HTML content to plain text.
+
+        Args:
+            html_text: HTML content to clean
+
+        Returns:
+            Plain text with all HTML tags removed and whitespace normalized
+        """
+        # Remove all HTML tags
+        text = re.sub(r'<[^>]+>', ' ', html_text)
+
+        # Decode common HTML entities
+        entities = {
+            '&nbsp;': ' ',
+            '&amp;': '&',
+            '&lt;': '<',
+            '&gt;': '>',
+            '&quot;': '"',
+            '&apos;': "'",
+            '&yen;': '¥',
+            '&euro;': '€',
+            '&pound;': '£',
+            '&copy;': '©',
+            '&reg;': '®',
+            '&trade;': '™',
+        }
+
+        for entity, replacement in entities.items():
+            text = text.replace(entity, replacement)
+
+        # Normalize whitespace - replace consecutive whitespace with a single space
+        text = re.sub(r'\s+', ' ', text)
+
+        return text.strip()
+
+    def _prepare_email_summary(self, email_data: Dict[str, Any], body_text: Optional[str] = None) -> str:
         """Prepare a comprehensive email summary with metadata for analysis.
 
         Args:
             email_data: Email data dictionary containing metadata and content
+            body_text: Optional pre-cleaned body text
 
         Returns:
             Formatted email summary string
@@ -97,11 +176,11 @@ class LLMAnalyzer:
         email_summary += f"Date: {email_data.get('date', '')}\n"
         email_summary += f"From: {email_data.get('from', '')}\n"
         email_summary += f"To: {email_data.get('to', '')}\n\n"
-        email_summary += f"Email Body:\n{email_data.get('body_text', '')}"
+        email_summary += f"Email Body:\n{body_text or email_data.get('body_text', '')}"
 
         return email_summary
 
-    def _call_llm_api(self, messages: list) -> str:
+    def _call_anthropic_api(self, messages: list) -> str:
         """Call the Anthropic Claude API with the given messages.
 
         Args:
@@ -128,7 +207,6 @@ class LLMAnalyzer:
             }
             """
 
-        # Only get to this code if we have an API key
         # Convert OpenAI-style messages format to Anthropic format
         system_content = ""
         user_content = ""
@@ -154,7 +232,7 @@ class LLMAnalyzer:
             "messages": [
                 {"role": "user", "content": user_content}
             ],
-            "temperature": 0.1,  # Low temperature for more deterministic results
+            "temperature": 0.0,  # Zero temperature for deterministic results
             "max_tokens": 1000,
         }
 

@@ -1,18 +1,25 @@
 """Date utility functions for the LLM analyzer."""
 
 from datetime import datetime
+import re
+from typing import Optional
 
 
-def normalize_date(date_str: str) -> str:
+def normalize_date(date_str: str, received_year: Optional[str] = None) -> str:
     """Normalize date string to YYYY-MM-DD format.
 
     Args:
         date_str: Date string in various possible formats
+        received_year: Year when the email was received, to use for Japanese dates without year
 
     Returns:
         Date string in YYYY-MM-DD format, or original string if parsing fails
     """
     try:
+        # If the input is already in YYYY-MM-DD format, return it
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
+            return date_str
+
         # Try various date formats
         formats = [
             "%Y-%m-%d",  # 2023-04-15
@@ -25,14 +32,23 @@ def normalize_date(date_str: str) -> str:
             "%b %d, %Y",  # Apr 15, 2023
         ]
 
-        # Japanese date pattern (2023年4月15日 -> 2023-04-15)
-        import re
+        # Japanese date with full year (2023年4月15日 -> 2023-04-15)
         jp_date_pattern = r"(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日"
         jp_match = re.search(jp_date_pattern, date_str)
         if jp_match:
             year = jp_match.group(1)
             month = jp_match.group(2).zfill(2)  # Pad single-digit month (4 -> 04)
             day = jp_match.group(3).zfill(2)    # Pad single-digit day (5 -> 05)
+            return f"{year}-{month}-{day}"
+
+        # Japanese date without year (4月15日 -> YYYY-04-15)
+        # Optionally includes day of week in parentheses (4月15日(月) -> YYYY-04-15)
+        jp_short_pattern = r"(\d{1,2})月\s*(\d{1,2})日(?:\([月火水木金土日]\))?"
+        jp_short_match = re.search(jp_short_pattern, date_str)
+        if jp_short_match and received_year:
+            year = received_year
+            month = jp_short_match.group(1).zfill(2)
+            day = jp_short_match.group(2).zfill(2)
             return f"{year}-{month}-{day}"
 
         # Try standard formats
